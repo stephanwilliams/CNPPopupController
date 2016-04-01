@@ -172,18 +172,26 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
             }
             else {
                 if (update) {
-                    view.frame = CGRectMake((size.width-_size.width+inset.left+inset.right)*0.5, result.height, _size.width, _size.height);
+                    view.frame = CGRectMake(0, result.height, _size.width, _size.height);
                 }
             }
             result.height += _size.height + self.theme.contentVerticalPadding;
             result.width = MAX(result.width, _size.width);
         }
     }
-    
+
     result.height -= self.theme.contentVerticalPadding;
     result.width += inset.left + inset.right;
     result.height = MIN(INFINITY, MAX(0.0f, result.height + inset.bottom));
-    if (update) self.popupView.frame = CGRectMake(0, 0, result.width, result.height);
+
+    if (update) {
+        for (UIView *view in self.popupView.subviews) {
+            view.frame = CGRectMake((result.width - view.frame.size.width) * 0.5, view.frame.origin.y, view.frame.size.width, view.frame.size.height);
+        }
+
+        self.popupView.frame = CGRectMake(0, 0, result.width, result.height);
+    }
+
     return result;
 }
 
