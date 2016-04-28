@@ -4,6 +4,7 @@
 //
 //  Created by Carson Perrotti on 2014-09-28.
 //  Copyright (c) 2014 Carson Perrotti. All rights reserved.
+//  Modifications copyright (c) 2016 Stephan Williams.
 //
 
 #import "CNPPopupController.h"
@@ -16,12 +17,85 @@ static inline UIViewAnimationOptions UIViewAnimationCurveToAnimationOptions(UIVi
     return curve << 16;
 }
 
+@interface CNPPopupView : UIView
+
+@property CGFloat contentVerticalPadding;
+@property UIEdgeInsets popupContentInsets;
+
+- (CGSize)calculateContentSizeThatFits:(CGSize)size andUpdateLayout:(BOOL)update;
+
+@end
+
+@implementation CNPPopupView
+
+@synthesize contentVerticalPadding, popupContentInsets;
+
+- (CGSize)calculateContentSizeThatFits:(CGSize)size andUpdateLayout:(BOOL)update
+{
+    UIEdgeInsets inset = self.popupContentInsets;
+    size.width -= (inset.left + inset.right);
+    size.height -= (inset.top + inset.bottom);
+    
+    CGSize result = CGSizeMake(0, inset.top);
+    for (UIView *view in self.subviews)
+    {
+        view.autoresizingMask = UIViewAutoresizingNone;
+        if (!view.hidden)
+        {
+            CGSize _size = view.frame.size;
+            if (CGSizeEqualToSize(_size, CGSizeZero))
+            {
+                _size = [view sizeThatFits:size];
+                _size.width = size.width;
+                if (update) view.frame = CGRectMake(inset.left, result.height, _size.width, _size.height);
+            }
+            else {
+                if (update) {
+                    view.frame = CGRectMake(0, result.height, _size.width, _size.height);
+                }
+            }
+            result.height += _size.height + self.contentVerticalPadding;
+            result.width = MAX(result.width, _size.width);
+        }
+    }
+
+    result.height -= self.contentVerticalPadding;
+    result.width += inset.left + inset.right;
+    result.height = MIN(INFINITY, MAX(0.0f, result.height + inset.bottom));
+
+    if (update) {
+        for (UIView *view in self.subviews) {
+            view.frame = CGRectMake((result.width - view.frame.size.width) * 0.5, view.frame.origin.y, view.frame.size.width, view.frame.size.height);
+        }
+
+        self.frame = CGRectMake(0, 0, result.width, result.height);
+    }
+    
+    NSLog(@"NEW SIZE: %@", NSStringFromCGSize(result));
+
+    return result;
+}
+
+- (CGSize)sizeThatFits:(CGSize)size
+{
+    NSLog(@"size that fits");
+    return [self calculateContentSizeThatFits:size andUpdateLayout:NO];
+}
+
+- (void)layoutSubviews {
+    NSLog(@"layout subviews");
+    [super layoutSubviews];
+    [self calculateContentSizeThatFits:self.frame.size andUpdateLayout:YES];
+}
+
+@end
+
 @interface CNPPopupController () <UIGestureRecognizerDelegate>
 
 @property (nonatomic, strong) UIWindow *applicationWindow;
 @property (nonatomic, strong) UIView *maskView;
 @property (nonatomic, strong) UITapGestureRecognizer *backgroundTapRecognizer;
-@property (nonatomic, strong) UIView *popupView;
+//@property (nonatomic, strong) CNPPopupView *popupView;
 @property (nonatomic, strong) NSArray *views;
 @property (nonatomic) BOOL dismissAnimated;
 
@@ -35,16 +109,16 @@ static inline UIViewAnimationOptions UIViewAnimationCurveToAnimationOptions(UIVi
         
         self.views = contents;
         
-        self.popupView = [[UIView alloc] initWithFrame:CGRectZero];
-        self.popupView.backgroundColor = [UIColor whiteColor];
-        self.popupView.clipsToBounds = YES;
+        self.view = [[CNPPopupView alloc] initWithFrame:CGRectZero];
+        self.view.backgroundColor = [UIColor whiteColor];
+        self.view.clipsToBounds = YES;
         
         self.maskView = [[UIView alloc] initWithFrame:self.applicationWindow.bounds];
         self.maskView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.7];
         self.backgroundTapRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleBackgroundTapGesture:)];
         self.backgroundTapRecognizer.delegate = self;
         [self.maskView addGestureRecognizer:self.backgroundTapRecognizer];
-        [self.maskView addSubview:self.popupView];
+        [self.maskView addSubview:self.view];
         
         self.theme = [CNPPopupTheme defaultTheme];
 
@@ -78,7 +152,7 @@ static inline UIViewAnimationOptions UIViewAnimationCurveToAnimationOptions(UIVi
     
     [UIView animateWithDuration:0.3 animations:^{
         self.maskView.frame = self.applicationWindow.bounds;
-        self.popupView.center = [self endingPoint];
+        self.view.center = [self endingPoint];
     }];
 }
 
@@ -90,9 +164,9 @@ static inline UIViewAnimationOptions UIViewAnimationCurveToAnimationOptions(UIVi
     
     [UIView animateWithDuration:0.3 animations:^{
         self.maskView.frame = self.applicationWindow.bounds;
-        self.popupView.center = [self endingPoint];
+        self.view.center = [self endingPoint];
         if (CNP_SYSTEM_VERSION_LESS_THAN(@"8.0")) {
-            self.popupView.transform = transform;
+            self.view.transform = transform;
         }
     }];
 }
@@ -130,11 +204,13 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
     if (self.theme.popupStyle == CNPPopupStyleActionSheet) {
         self.theme.presentationStyle = CNPPopupPresentationStyleSlideInFromBottom;
     }
-    self.popupView.layer.cornerRadius = self.theme.popupStyle == CNPPopupStyleCentered?self.theme.cornerRadius:0;
-    self.popupView.backgroundColor = self.theme.backgroundColor;
+    self.view.layer.cornerRadius = self.theme.popupStyle == CNPPopupStyleCentered?self.theme.cornerRadius:0;
+    self.view.backgroundColor = self.theme.backgroundColor;
+    ((CNPPopupView *)self.view).contentVerticalPadding = self.theme.contentVerticalPadding;
+    ((CNPPopupView *)self.view).popupContentInsets = self.theme.popupContentInsets;
     UIColor *maskBackgroundColor;
     if (self.theme.popupStyle == CNPPopupStyleFullscreen) {
-        maskBackgroundColor = self.popupView.backgroundColor;
+        maskBackgroundColor = self.view.backgroundColor;
     }
     else {
         maskBackgroundColor = self.theme.maskType == CNPPopupMaskTypeClear?[UIColor clearColor] : [UIColor colorWithWhite:0.0 alpha:0.7];
@@ -147,57 +223,8 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 - (void)addPopupContents {
     for (UIView *view in self.views)
     {
-        [self.popupView addSubview:view];
+        [self.view addSubview:view];
     }
-}
-
-- (CGSize)calculateContentSizeThatFits:(CGSize)size andUpdateLayout:(BOOL)update
-{
-    UIEdgeInsets inset = self.theme.popupContentInsets;
-    size.width -= (inset.left + inset.right);
-    size.height -= (inset.top + inset.bottom);
-    
-    CGSize result = CGSizeMake(0, inset.top);
-    for (UIView *view in self.popupView.subviews)
-    {
-        view.autoresizingMask = UIViewAutoresizingNone;
-        if (!view.hidden)
-        {
-            CGSize _size = view.frame.size;
-            if (CGSizeEqualToSize(_size, CGSizeZero))
-            {
-                _size = [view sizeThatFits:size];
-                _size.width = size.width;
-                if (update) view.frame = CGRectMake(inset.left, result.height, _size.width, _size.height);
-            }
-            else {
-                if (update) {
-                    view.frame = CGRectMake(0, result.height, _size.width, _size.height);
-                }
-            }
-            result.height += _size.height + self.theme.contentVerticalPadding;
-            result.width = MAX(result.width, _size.width);
-        }
-    }
-
-    result.height -= self.theme.contentVerticalPadding;
-    result.width += inset.left + inset.right;
-    result.height = MIN(INFINITY, MAX(0.0f, result.height + inset.bottom));
-
-    if (update) {
-        for (UIView *view in self.popupView.subviews) {
-            view.frame = CGRectMake((result.width - view.frame.size.width) * 0.5, view.frame.origin.y, view.frame.size.width, view.frame.size.height);
-        }
-
-        self.popupView.frame = CGRectMake(0, 0, result.width, result.height);
-    }
-
-    return result;
-}
-
-- (CGSize)sizeThatFits:(CGSize)size
-{
-    return [self calculateContentSizeThatFits:size andUpdateLayout:NO];
 }
 
 #pragma mark - Keyboard 
@@ -206,7 +233,7 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 {
     if (self.theme.movesAboveKeyboard) {
         CGRect frame = [[[notification userInfo] objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
-        frame = [self.popupView convertRect:frame fromView:nil];
+        frame = [self.view convertRect:frame fromView:nil];
         NSTimeInterval duration = [[notification.userInfo objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];
         UIViewAnimationCurve curve = [[notification.userInfo objectForKey:UIKeyboardAnimationCurveUserInfoKey] integerValue];
         
@@ -216,13 +243,13 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 
 - (void)keyboardWithEndFrame:(CGRect)keyboardFrame willShowAfterDuration:(NSTimeInterval)duration withOptions:(UIViewAnimationOptions)options
 {
-    CGRect popupViewIntersection = CGRectIntersection(self.popupView.frame, keyboardFrame);
+    CGRect popupViewIntersection = CGRectIntersection(self.view.frame, keyboardFrame);
     
     if (popupViewIntersection.size.height > 0) {
         CGRect maskViewIntersection = CGRectIntersection(self.maskView.frame, keyboardFrame);
         
         [UIView animateWithDuration:duration delay:0.0f options:options animations:^{
-            self.popupView.center = CGPointMake(self.popupView.center.x, (CGRectGetHeight(self.maskView.frame) - maskViewIntersection.size.height) / 2);
+            self.view.center = CGPointMake(self.view.center.x, (CGRectGetHeight(self.maskView.frame) - maskViewIntersection.size.height) / 2);
         } completion:nil];
     }
 }
@@ -231,7 +258,7 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 {
     if (self.theme.movesAboveKeyboard) {
         CGRect frame = [[[notification userInfo] objectForKey:UIKeyboardFrameBeginUserInfoKey] CGRectValue];
-        frame = [self.popupView convertRect:frame fromView:nil];
+        frame = [self.view convertRect:frame fromView:nil];
         NSTimeInterval duration = [[notification.userInfo objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];
         UIViewAnimationCurve curve = [[notification.userInfo objectForKey:UIKeyboardAnimationCurveUserInfoKey] integerValue];
         
@@ -242,7 +269,7 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 - (void)keyboardWithStartFrame:(CGRect)keyboardFrame willHideAfterDuration:(NSTimeInterval)duration withOptions:(UIViewAnimationOptions)options
 {
     [UIView animateWithDuration:duration delay:0.0f options:options animations:^{
-        self.popupView.center = self.maskView.center;
+        self.view.center = self.maskView.center;
     } completion:nil];
 }
 
@@ -258,15 +285,15 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
     self.dismissAnimated = flag;
     
     [self applyTheme];
-    [self calculateContentSizeThatFits:CGSizeMake([self popupWidth], self.maskView.bounds.size.height) andUpdateLayout:YES];
-    self.popupView.center = [self originPoint];
+    [((CNPPopupView *)self.view) calculateContentSizeThatFits:CGSizeMake([self popupWidth], self.maskView.bounds.size.height) andUpdateLayout:YES];
+    self.view.center = [self originPoint];
     [self.applicationWindow addSubview:self.maskView];
     self.maskView.alpha = 0;
     [UIView animateWithDuration:flag?0.3:0.0 animations:^{
         self.maskView.alpha = 1.0;
-        self.popupView.center = [self endingPoint];;
+        self.view.center = [self endingPoint];;
     } completion:^(BOOL finished) {
-        self.popupView.userInteractionEnabled = YES;
+        self.view.userInteractionEnabled = YES;
         if ([self.delegate respondsToSelector:@selector(popupControllerDidPresent:)]) {
             [self.delegate popupControllerDidPresent:self];
         }
@@ -279,7 +306,7 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
     }
     [UIView animateWithDuration:flag?0.3:0.0 animations:^{
         self.maskView.alpha = 0.0;
-        self.popupView.center = [self dismissedPoint];;
+        self.view.center = [self dismissedPoint];;
     } completion:^(BOOL finished) {
         [self.maskView removeFromSuperview];
         if ([self.delegate respondsToSelector:@selector(popupControllerDidDismiss:)]) {
@@ -295,16 +322,16 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
             origin = self.maskView.center;
             break;
         case CNPPopupPresentationStyleSlideInFromBottom:
-            origin = CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.popupView.bounds.size.height);
+            origin = CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.view.bounds.size.height);
             break;
         case CNPPopupPresentationStyleSlideInFromLeft:
-            origin = CGPointMake(-self.popupView.bounds.size.width, self.maskView.center.y);
+            origin = CGPointMake(-self.view.bounds.size.width, self.maskView.center.y);
             break;
         case CNPPopupPresentationStyleSlideInFromRight:
-            origin = CGPointMake(self.maskView.bounds.size.width+self.popupView.bounds.size.width, self.maskView.center.y);
+            origin = CGPointMake(self.maskView.bounds.size.width+self.view.bounds.size.width, self.maskView.center.y);
             break;
         case CNPPopupPresentationStyleSlideInFromTop:
-            origin = CGPointMake(self.maskView.center.x, -self.popupView.bounds.size.height);
+            origin = CGPointMake(self.maskView.center.x, -self.view.bounds.size.height);
             break;
         default:
             origin = self.maskView.center;
@@ -316,12 +343,18 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 - (CGPoint)endingPoint {
     CGPoint center;
     if (self.theme.popupStyle == CNPPopupStyleActionSheet) {
-        center = CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height-(self.popupView.bounds.size.height * 0.5));
+        center = CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height-(self.view.bounds.size.height * 0.5));
     }
     else {
         center = self.maskView.center;
     }
     return center;
+}
+
+- (void)viewDidLayoutSubviews {
+    [UIView animateWithDuration:0.3 animations:^{
+        self.view.center = [self endingPoint];;
+    } completion:^(BOOL finished) {}];
 }
 
 - (CGPoint)dismissedPoint {
@@ -331,19 +364,19 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
             dismissed = self.maskView.center;
             break;
         case CNPPopupPresentationStyleSlideInFromBottom:
-            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(self.maskView.center.x, -self.popupView.bounds.size.height):CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.popupView.bounds.size.height);
+            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(self.maskView.center.x, -self.view.bounds.size.height):CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.view.bounds.size.height);
             if (self.theme.popupStyle == CNPPopupStyleActionSheet) {
-                dismissed = CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.popupView.bounds.size.height);
+                dismissed = CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.view.bounds.size.height);
             }
             break;
         case CNPPopupPresentationStyleSlideInFromLeft:
-            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(self.maskView.bounds.size.width+self.popupView.bounds.size.width, self.maskView.center.y):CGPointMake(-self.popupView.bounds.size.width, self.maskView.center.y);
+            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(self.maskView.bounds.size.width+self.view.bounds.size.width, self.maskView.center.y):CGPointMake(-self.view.bounds.size.width, self.maskView.center.y);
             break;
         case CNPPopupPresentationStyleSlideInFromRight:
-            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(-self.popupView.bounds.size.width, self.maskView.center.y):CGPointMake(self.maskView.bounds.size.width+self.popupView.bounds.size.width, self.maskView.center.y);
+            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(-self.view.bounds.size.width, self.maskView.center.y):CGPointMake(self.maskView.bounds.size.width+self.view.bounds.size.width, self.maskView.center.y);
             break;
         case CNPPopupPresentationStyleSlideInFromTop:
-            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.popupView.bounds.size.height):CGPointMake(self.maskView.center.x, -self.popupView.bounds.size.height);
+            dismissed = self.theme.dismissesOppositeDirection?CGPointMake(self.maskView.center.x, self.maskView.bounds.size.height + self.view.bounds.size.height):CGPointMake(self.maskView.center.x, -self.view.bounds.size.height);
             break;
         default:
             dismissed = self.maskView.center;
@@ -364,14 +397,14 @@ CGFloat CNP_UIInterfaceOrientationAngleOfOrientation(UIInterfaceOrientation orie
 
 - (void)handleBackgroundTapGesture:(id)sender {
     if (self.theme.shouldDismissOnBackgroundTouch) {
-        [self.popupView endEditing:YES];
+        [self.view endEditing:YES];
         [self dismissPopupControllerAnimated:self.dismissAnimated];
     }
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch
 {
-    if ([touch.view isDescendantOfView:self.popupView])
+    if ([touch.view isDescendantOfView:self.view])
         return NO;
     return YES;
 }

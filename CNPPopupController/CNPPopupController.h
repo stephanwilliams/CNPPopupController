@@ -11,7 +11,7 @@
 @protocol CNPPopupControllerDelegate;
 @class CNPPopupTheme, CNPPopupButton;
 
-@interface CNPPopupController : NSObject
+@interface CNPPopupController : UIViewController
 
 @property (nonatomic, strong) CNPPopupTheme *theme;
 @property (nonatomic, weak) id <CNPPopupControllerDelegate> delegate;
